@@ -74,11 +74,11 @@ router.post('/register', async (req, res) => {
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      process.env.JWT_SECRET || 'fallback-secret',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' } as jwt.SignOptions
     )
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: {
         user,
@@ -87,7 +87,7 @@ router.post('/register', async (req, res) => {
     })
   } catch (error) {
     console.error('Registration error:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: {
         code: 'INTERNAL_ERROR',
@@ -143,11 +143,11 @@ router.post('/login', async (req, res) => {
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      process.env.JWT_SECRET || 'fallback-secret',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' } as jwt.SignOptions
     )
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         user: {
@@ -162,7 +162,7 @@ router.post('/login', async (req, res) => {
     })
   } catch (error) {
     console.error('Login error:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: {
         code: 'INTERNAL_ERROR',
@@ -186,7 +186,7 @@ router.get('/me', async (req, res) => {
       })
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret') as any
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
@@ -208,13 +208,13 @@ router.get('/me', async (req, res) => {
       })
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: { user }
     })
   } catch (error) {
     console.error('Get user error:', error)
-    res.status(401).json({
+    return res.status(401).json({
       success: false,
       error: {
         code: 'INVALID_TOKEN',

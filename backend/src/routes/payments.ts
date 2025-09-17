@@ -193,7 +193,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // Check if payment amount matches expected amount
-    if (Math.abs(amount - nextPayment.amount) > 0.01) {
+    if (Math.abs(amount - Number(nextPayment.amount)) > 0.01) {
       return res.status(400).json({
         success: false,
         error: {
