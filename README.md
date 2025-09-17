@@ -97,4 +97,4 @@ MIT License - See LICENSE file for details
 
 Michigan Tokenizers
 - Website: [michigantokenizers.com]
-- Email: [contact@michigantokenizers.com]
+- Email: [info@michigantokenizers.com]
