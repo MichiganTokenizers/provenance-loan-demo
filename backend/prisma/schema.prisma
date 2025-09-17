@@ -1,0 +1,127 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("banker") // banker, admin, viewer
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Loan {
+  id                        String   @id @default(cuid())
+  borrowerName              String
+  borrowerEmail             String
+  borrowerPhone             String
+  borrowerSSN               String
+  loanAmount                Decimal  @db.Decimal(15, 2)
+  interestRate              Decimal  @db.Decimal(5, 2)
+  loanTerm                  Int
+  loanPurpose               String
+  monthlyPayment            Decimal  @db.Decimal(15, 2)
+  totalInterest             Decimal  @db.Decimal(15, 2)
+  totalAmount               Decimal  @db.Decimal(15, 2)
+  status                    String   @default("pending") // pending, approved, active, completed, defaulted, cancelled
+  employmentStatus          String
+  annualIncome              Decimal  @db.Decimal(15, 2)
+  creditScore               Int
+  notes                     String?
+  
+  // Blockchain fields
+  blockchainAssetId         String?
+  blockchainContractAddress String?
+  blockchainTransactionHash String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  collateral Collateral?
+  payments   Payment[]
+
+  @@map("loans")
+}
+
+model Collateral {
+  id          String  @id @default(cuid())
+  loanId      String  @unique
+  type        String  // real_estate, vehicle, equipment, securities, other
+  value       Decimal @db.Decimal(15, 2)
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  loan Loan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@map("collateral")
+}
+
+model Payment {
+  id                        String    @id @default(cuid())
+  loanId                    String
+  amount                    Decimal   @db.Decimal(15, 2)
+  principal                 Decimal   @db.Decimal(15, 2)
+  interest                  Decimal   @db.Decimal(15, 2)
+  fees                      Decimal   @db.Decimal(15, 2) @default(0)
+  dueDate                   DateTime
+  paidDate                  DateTime?
+  status                    String    @default("pending") // paid, pending, overdue, cancelled
+  paymentMethod             String?   // bank_transfer, ach, wire, check, cash
+  reference                 String?
+  notes                     String?
+  
+  // Blockchain fields
+  blockchainTransactionHash String?
+  blockchainBlockNumber     Int?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  loan Loan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // CREATE, UPDATE, DELETE, LOGIN, LOGOUT, etc.
+  resource  String   // loan, payment, user, etc.
+  resourceId String?
+  oldValues Json?
+  newValues Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  type      String   @default("string") // string, number, boolean, json
+  category  String   @default("general")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_config")
+}
