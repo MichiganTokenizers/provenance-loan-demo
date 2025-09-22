@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { 
   HomeIcon, 
   PlusIcon, 
   ChartBarIcon, 
   CogIcon,
   Bars3Icon,
-  XMarkIcon
+  XMarkIcon,
+  ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline'
 
 interface LayoutProps {
@@ -23,6 +25,7 @@ const navigation = [
 export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+  const { user, logout } = useAuth()
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -116,11 +119,22 @@ export default function Layout({ children }: LayoutProps) {
               <div className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-200" />
               <div className="flex items-center gap-x-2">
                 <div className="h-8 w-8 rounded-full bg-primary-100 flex items-center justify-center">
-                  <span className="text-sm font-medium text-primary-700">MT</span>
+                  <span className="text-sm font-medium text-primary-700">
+                    {user?.name?.charAt(0) || 'U'}
+                  </span>
                 </div>
-                <span className="hidden lg:block text-sm font-medium text-gray-700">
-                  Michigan Tokenizers
-                </span>
+                <div className="hidden lg:block">
+                  <span className="text-sm font-medium text-gray-700">
+                    {user?.name || 'Demo User'}
+                  </span>
+                  <button
+                    onClick={logout}
+                    className="ml-2 text-gray-400 hover:text-gray-600"
+                    title="Logout"
+                  >
+                    <ArrowRightOnRectangleIcon className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>

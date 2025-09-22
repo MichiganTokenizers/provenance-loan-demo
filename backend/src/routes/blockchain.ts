@@ -1,5 +1,6 @@
 import express from 'express'
 import Joi from 'joi'
+import axios from 'axios'
 import { PrismaClient } from '@prisma/client'
 import { authenticateToken } from '../middleware/auth'
 
@@ -19,7 +20,10 @@ const deployContractSchema = Joi.object({
   parameters: Joi.object().required()
 })
 
-// Register asset on Provenance blockchain
+// Resolve MCP base URL
+const MCP_BASE_URL = process.env.MCP_BASE_URL || 'http://localhost:6060'
+
+// Register asset on Provenance blockchain (via MCP)
 router.post('/register-asset', authenticateToken, async (req, res) => {
   try {
     const { error, value } = registerAssetSchema.validate(req.body)
@@ -50,10 +54,13 @@ router.post('/register-asset', authenticateToken, async (req, res) => {
       })
     }
 
-    // Simulate blockchain asset registration
-    // In a real implementation, this would interact with Provenance blockchain
-    const assetId = `provenance_asset_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const transactionHash = `0x${Math.random().toString(16).substr(2, 64)}`
+    // Call MCP stub
+    const mcpResp = await axios.post(`${MCP_BASE_URL}/tools/provenance/register-asset`, {
+      loanId,
+      metadata
+    })
+    const assetId = mcpResp.data?.assetId || mcpResp.data?.data?.assetId || null
+    const transactionHash = mcpResp.data?.txHash || mcpResp.data?.data?.txHash || null
 
     // Update loan with blockchain information
     const updatedLoan = await prisma.loan.update({
@@ -64,7 +71,7 @@ router.post('/register-asset', authenticateToken, async (req, res) => {
       }
     })
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         assetId,
@@ -74,7 +81,7 @@ router.post('/register-asset', authenticateToken, async (req, res) => {
     })
   } catch (error) {
     console.error('Register asset error:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: {
         code: 'BLOCKCHAIN_ERROR',
@@ -213,7 +220,7 @@ router.get('/asset/:assetId', authenticateToken, async (req, res) => {
   }
 })
 
-// Process payment on blockchain
+// Process payment on blockchain (via MCP)
 router.post('/process-payment', authenticateToken, async (req, res) => {
   try {
     const { loanId, paymentId, amount } = req.body
@@ -254,10 +261,14 @@ router.post('/process-payment', authenticateToken, async (req, res) => {
       })
     }
 
-    // Simulate blockchain payment processing
-    // In a real implementation, this would process payment on Provenance blockchain
-    const transactionHash = `0x${Math.random().toString(16).substr(2, 64)}`
-    const blockNumber = Math.floor(Math.random() * 1000000) + 1000000
+    // Call MCP stub
+    const mcpResp = await axios.post(`${MCP_BASE_URL}/tools/provenance/process-payment`, {
+      loanId,
+      paymentId,
+      amount: Number(amount)
+    })
+    const transactionHash = mcpResp.data?.txHash || mcpResp.data?.data?.txHash || null
+    const blockNumber = Date.now() // simulated placeholder since MCP stub doesn't return block
 
     // Update payment with blockchain information
     const updatedPayment = await prisma.payment.update({
@@ -270,7 +281,7 @@ router.post('/process-payment', authenticateToken, async (req, res) => {
       }
     })
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         transactionHash,
@@ -280,7 +291,7 @@ router.post('/process-payment', authenticateToken, async (req, res) => {
     })
   } catch (error) {
     console.error('Process payment on blockchain error:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: {
         code: 'BLOCKCHAIN_ERROR',
@@ -290,28 +301,18 @@ router.post('/process-payment', authenticateToken, async (req, res) => {
   }
 })
 
-// Get blockchain network status
+// Get blockchain network status (via MCP)
 router.get('/status', authenticateToken, async (req, res) => {
   try {
-    // Simulate blockchain status check
-    // In a real implementation, this would check Provenance blockchain status
-    const status = {
-      network: process.env.PROVENANCE_NETWORK || 'testnet',
-      rpcUrl: process.env.PROVENANCE_RPC_URL || 'https://rpc.test.provenance.io',
-      chainId: process.env.PROVENANCE_CHAIN_ID || 'pio-testnet-1',
-      status: 'connected',
-      lastBlock: Math.floor(Math.random() * 1000000) + 1000000,
-      gasPrice: '0.000000001',
-      uptime: '99.9%'
-    }
-
-    res.json({
+    const mcpResp = await axios.get(`${MCP_BASE_URL}/tools/provenance/status`)
+    const status = mcpResp.data
+    return res.json({
       success: true,
       data: { status }
     })
   } catch (error) {
     console.error('Get blockchain status error:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: {
         code: 'BLOCKCHAIN_ERROR',

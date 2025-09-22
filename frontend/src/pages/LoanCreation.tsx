@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { useAuth } from '../contexts/AuthContext'
 import { 
   UserIcon, 
   BanknotesIcon, 
@@ -56,6 +57,7 @@ export default function LoanCreation() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const { token } = useAuth()
 
   const {
     register,
@@ -112,11 +114,42 @@ export default function LoanCreation() {
     setSubmissionStatus('idle')
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      console.log('Loan application data:', data)
-      setSubmissionStatus('success')
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+
+      const response = await fetch(`${apiBase}/loans`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          borrowerName: data.borrowerName,
+          borrowerEmail: data.borrowerEmail,
+          borrowerPhone: data.borrowerPhone,
+          borrowerSSN: data.borrowerSSN,
+          loanAmount: data.loanAmount,
+          interestRate: data.interestRate,
+          loanTerm: data.loanTerm,
+          loanPurpose: data.loanPurpose,
+          collateralType: data.collateralType,
+          collateralValue: data.collateralValue,
+          collateralDescription: data.collateralDescription,
+          employmentStatus: data.employmentStatus,
+          annualIncome: data.annualIncome,
+          creditScore: data.creditScore
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`)
+      }
+
+      const result = await response.json()
+      if (result?.success) {
+        setSubmissionStatus('success')
+      } else {
+        throw new Error('API returned unsuccessful response')
+      }
     } catch (error) {
       console.error('Error submitting loan application:', error)
       setSubmissionStatus('error')
