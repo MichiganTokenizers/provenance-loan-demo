@@ -46,6 +46,8 @@ model Loan {
   blockchainAssetId         String?
   blockchainContractAddress String?
   blockchainTransactionHash String?
+  blockchainLedgerId        String?
+  blockchainRegistryId      String?
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -81,7 +83,7 @@ model Payment {
   fees                      Decimal   @db.Decimal(15, 2) @default(0)
   dueDate                   DateTime
   paidDate                  DateTime?
-  status                    String    @default("pending") // paid, pending, overdue, cancelled
+  status                    String    @default("scheduled") // paid, scheduled, pending, overdue, cancelled
   paymentMethod             String?   // bank_transfer, ach, wire, check, cash
   reference                 String?
   notes                     String?
@@ -89,6 +91,7 @@ model Payment {
   // Blockchain fields
   blockchainTransactionHash String?
   blockchainBlockNumber     Int?
+  blockchainLedgerEntryId   String?
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -27,6 +27,16 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
       })
     }
 
+    // Handle mock demo token
+    if (token === 'demo-token-123') {
+      req.user = {
+        userId: 'demo-user-123',
+        email: 'demo@michigantokenizers.com',
+        role: 'banker'
+      }
+      return next()
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any
     
     // Verify user still exists

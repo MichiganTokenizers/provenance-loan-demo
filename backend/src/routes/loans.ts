@@ -217,7 +217,7 @@ router.post('/', authenticateToken, async (req, res) => {
         interest: interestPayment,
         fees: 0,
         dueDate,
-        status: 'pending'
+        status: 'scheduled'
       })
     }
 

@@ -13,6 +13,11 @@ This service exposes a minimal MCP-style API surface for Provenance and Blockvau
 - `GET /tools/provenance/status` — network status
 - `POST /tools/provenance/register-asset` — register a loan asset (stub)
 - `POST /tools/provenance/process-payment` — process a payment (stub)
+- `POST /tools/provenance/asset-class` — create or ensure asset class (stub)
+- `POST /tools/provenance/asset` — create asset instance for a loan (stub)
+- `POST /tools/provenance/ledger/create` — create loan ledger (stub)
+- `POST /tools/provenance/ledger/post` — post DISBURSEMENT/PAYMENT/INTEREST (stub)
+- `POST /tools/provenance/registry/assign` — assign roles (stub)
 - `POST /tools/blockvault/store` — store a document (stub)
 - `POST /tools/blockvault/attest` — create an attestation (stub)
 

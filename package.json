@@ -20,7 +20,7 @@
     "fintech"
   ],
   "author": "Michigan Tokenizers",
-  "license": "MIT",
+  "license": "",
   "devDependencies": {
     "concurrently": "^8.2.2"
   }

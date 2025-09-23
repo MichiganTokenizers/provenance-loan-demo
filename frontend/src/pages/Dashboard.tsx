@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import { 
   BanknotesIcon, 
   UserGroupIcon, 
@@ -22,68 +23,122 @@ interface RecentLoan {
   id: string
   borrowerName: string
   amount: number
-  status: 'active' | 'pending' | 'completed' | 'defaulted'
+  status: 'active' | 'pending' | 'completed' | 'defaulted' | 'approved'
   createdAt: string
 }
 
-const mockStats: DashboardStats = {
-  totalLoans: 1247,
-  activeLoans: 892,
-  totalAmount: 45600000,
-  monthlyPayments: 2340000,
-  loanGrowth: 12.5,
-  paymentGrowth: 8.3
+// Empty initial data - will be populated from API
+const initialStats: DashboardStats = {
+  totalLoans: 0,
+  activeLoans: 0,
+  totalAmount: 0,
+  monthlyPayments: 0,
+  loanGrowth: 0,
+  paymentGrowth: 0
 }
 
-const mockRecentLoans: RecentLoan[] = [
-  {
-    id: '1',
-    borrowerName: 'John Smith',
-    amount: 250000,
-    status: 'active',
-    createdAt: '2024-01-15T10:30:00Z'
-  },
-  {
-    id: '2',
-    borrowerName: 'Sarah Johnson',
-    amount: 180000,
-    status: 'pending',
-    createdAt: '2024-01-14T14:20:00Z'
-  },
-  {
-    id: '3',
-    borrowerName: 'Michael Brown',
-    amount: 320000,
-    status: 'active',
-    createdAt: '2024-01-13T09:15:00Z'
-  },
-  {
-    id: '4',
-    borrowerName: 'Emily Davis',
-    amount: 150000,
-    status: 'completed',
-    createdAt: '2024-01-12T16:45:00Z'
-  }
-]
-
-const mockChartData = [
-  { month: 'Jan', loans: 45, payments: 1200000 },
-  { month: 'Feb', loans: 52, payments: 1350000 },
-  { month: 'Mar', loans: 48, payments: 1280000 },
-  { month: 'Apr', loans: 61, payments: 1450000 },
-  { month: 'May', loans: 55, payments: 1380000 },
-  { month: 'Jun', loans: 67, payments: 1520000 }
-]
-
-const mockPaymentData = [
-  { status: 'On Time', count: 756, percentage: 84.7 },
-  { status: 'Late', count: 98, percentage: 11.0 },
-  { status: 'Defaulted', count: 38, percentage: 4.3 }
-]
-
 export default function Dashboard() {
-  const [stats, setStats] = useState<DashboardStats>(mockStats)
-  const [recentLoans, setRecentLoans] = useState<RecentLoan[]>(mockRecentLoans)
+  const [stats, setStats] = useState<DashboardStats>(initialStats)
+  const [recentLoans, setRecentLoans] = useState<RecentLoan[]>([])
+  const [loading, setLoading] = useState(true)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const { token } = useAuth()
+
+  // Fetch loans data on component mount
+  useEffect(() => {
+    const fetchLoans = async () => {
+      if (!token) return
+      
+      try {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+        const response = await fetch(`${apiBase}/loans?t=${Date.now()}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          cache: 'no-store'
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success) {
+            const loans = data.data.loans || []
+            // Map to UI shape and ensure numeric conversions
+            const mappedRecentLoans = loans.slice(0, 5).map((loan: any) => ({
+              id: loan.id,
+              borrowerName: loan.borrowerName,
+              amount: Number(loan.loanAmount || 0),
+              status: loan.status,
+              createdAt: loan.createdAt
+            }))
+            setRecentLoans(mappedRecentLoans)
+            
+            // Calculate stats from real data
+            const totalLoans = loans.length
+            const activeLoans = loans.filter((loan: any) => loan.status === 'active' || loan.status === 'pending').length
+            const totalAmount = loans.reduce((sum: number, loan: any) => sum + Number(loan.loanAmount || 0), 0)
+            const monthlyPayments = loans.reduce((sum: number, loan: any) => sum + Number(loan.monthlyPayment || 0), 0)
+            
+            setStats({
+              totalLoans,
+              activeLoans,
+              totalAmount,
+              monthlyPayments,
+              loanGrowth: 0, // Could calculate from historical data
+              paymentGrowth: 0 // Could calculate from historical data
+            })
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching loans:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchLoans()
+  }, [token])
+
+  // Listen for payment processing events to refresh data
+  useEffect(() => {
+    const handlePaymentProcessed = () => {
+      fetchLoans()
+    }
+
+    window.addEventListener('paymentProcessed', handlePaymentProcessed)
+    return () => window.removeEventListener('paymentProcessed', handlePaymentProcessed)
+  }, [token])
+
+  const approveLoan = async (loanId: string) => {
+    if (!token) return
+    try {
+      setApprovingId(loanId)
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+      const res = await fetch(`${apiBase}/loans/${loanId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: 'approved' })
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error?.message || 'Failed to approve loan')
+      }
+      // Update UI state
+      setRecentLoans(prev => prev.map(l => l.id === loanId ? { ...l, status: 'approved' as any } : l))
+      // Recompute stats quickly
+      setStats(prev => ({
+        ...prev,
+        activeLoans: prev.activeLoans + 1
+      }))
+    } catch (e) {
+      console.error('Approve loan failed:', e)
+      alert((e as Error).message)
+    } finally {
+      setApprovingId(null)
+    }
+  }
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -104,9 +159,30 @@ export default function Dashboard() {
         return 'bg-blue-100 text-blue-800'
       case 'defaulted':
         return 'bg-red-100 text-red-800'
+      case 'approved':
+        return 'bg-purple-100 text-purple-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="mt-1 text-sm text-gray-500">Loading your loan data...</p>
+        </div>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="card p-6 animate-pulse">
+              <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+              <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -194,137 +270,86 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Growth Indicators */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-        <div className="card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">Loan Growth</h3>
-              <p className="text-sm text-gray-500">Compared to last month</p>
-            </div>
-            <div className="flex items-center">
-              <ArrowUpIcon className="h-5 w-5 text-green-500" />
-              <span className="ml-1 text-lg font-semibold text-green-600">
-                +{stats.loanGrowth}%
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">Payment Growth</h3>
-              <p className="text-sm text-gray-500">Compared to last month</p>
-            </div>
-            <div className="flex items-center">
-              <ArrowUpIcon className="h-5 w-5 text-green-500" />
-              <span className="ml-1 text-lg font-semibold text-green-600">
-                +{stats.paymentGrowth}%
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Loan Trends Chart */}
-        <div className="card p-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Loan Trends</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={mockChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value, name) => [
-                    name === 'loans' ? value : formatCurrency(Number(value)),
-                    name === 'loans' ? 'Loans' : 'Payments'
-                  ]}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="loans" 
-                  stroke="#3b82f6" 
-                  strokeWidth={2}
-                  name="loans"
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="payments" 
-                  stroke="#10b981" 
-                  strokeWidth={2}
-                  name="payments"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Payment Status Chart */}
-        <div className="card p-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Payment Status Distribution</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={mockPaymentData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="status" />
-                <YAxis />
-                <Tooltip formatter={(value) => [value, 'Count']} />
-                <Bar dataKey="count" fill="#3b82f6" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
 
       {/* Recent Loans */}
       <div className="card">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-medium text-gray-900">Recent Loans</h3>
         </div>
-        <div className="overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Borrower
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Created
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {recentLoans.map((loan) => (
-                <tr key={loan.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {loan.borrowerName}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatCurrency(loan.amount)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(loan.status)}`}>
-                      {loan.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(loan.createdAt).toLocaleDateString()}
-                  </td>
+        {recentLoans.length > 0 ? (
+          <div className="overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Borrower
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Amount
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Created
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {recentLoans.map((loan) => (
+                  <tr key={loan.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {loan.borrowerName}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {formatCurrency(loan.amount)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(loan.status)}`}>
+                        {loan.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {new Date(loan.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {loan.status === 'pending' ? (
+                        <button
+                          onClick={() => approveLoan(loan.id)}
+                          disabled={approvingId === loan.id}
+                          className={`btn btn-primary ${approvingId === loan.id ? 'opacity-70 cursor-not-allowed' : ''}`}
+                        >
+                          {approvingId === loan.id ? 'Approving…' : 'Approve'}
+                        </button>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <BanknotesIcon className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No loans yet</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Get started by creating your first loan.
+            </p>
+            <div className="mt-6">
+              <a
+                href="/loans/create"
+                className="btn btn-primary"
+              >
+                Create Loan
+              </a>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

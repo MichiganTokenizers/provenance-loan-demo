@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import { 
   MagnifyingGlassIcon,
   FunnelIcon,
@@ -6,7 +7,9 @@ import {
   EyeIcon,
   CheckCircleIcon,
   ClockIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  PlusIcon,
+  XMarkIcon
 } from '@heroicons/react/24/outline'
 import { format } from 'date-fns'
 
@@ -17,7 +20,7 @@ interface Payment {
   amount: number
   dueDate: string
   paidDate?: string
-  status: 'paid' | 'pending' | 'overdue' | 'partial'
+  status: 'paid' | 'scheduled' | 'pending' | 'overdue' | 'partial'
   paymentMethod?: string
   reference?: string
   principal: number
@@ -25,80 +28,148 @@ interface Payment {
   fees: number
 }
 
-const mockPayments: Payment[] = [
-  {
-    id: '1',
-    loanId: 'LOAN-001',
-    borrowerName: 'John Smith',
-    amount: 1250.00,
-    dueDate: '2024-01-15T00:00:00Z',
-    paidDate: '2024-01-14T10:30:00Z',
-    status: 'paid',
-    paymentMethod: 'Bank Transfer',
-    reference: 'TXN123456',
-    principal: 1000.00,
-    interest: 200.00,
-    fees: 50.00
-  },
-  {
-    id: '2',
-    loanId: 'LOAN-002',
-    borrowerName: 'Sarah Johnson',
-    amount: 850.00,
-    dueDate: '2024-01-20T00:00:00Z',
-    status: 'pending',
-    principal: 700.00,
-    interest: 120.00,
-    fees: 30.00
-  },
-  {
-    id: '3',
-    loanId: 'LOAN-003',
-    borrowerName: 'Michael Brown',
-    amount: 2100.00,
-    dueDate: '2024-01-10T00:00:00Z',
-    status: 'overdue',
-    principal: 1800.00,
-    interest: 250.00,
-    fees: 50.00
-  },
-  {
-    id: '4',
-    loanId: 'LOAN-004',
-    borrowerName: 'Emily Davis',
-    amount: 950.00,
-    dueDate: '2024-01-25T00:00:00Z',
-    paidDate: '2024-01-24T14:20:00Z',
-    status: 'paid',
-    paymentMethod: 'ACH',
-    reference: 'TXN789012',
-    principal: 800.00,
-    interest: 130.00,
-    fees: 20.00
-  }
-]
+interface Loan {
+  id: string
+  borrowerName: string
+  loanAmount: number
+  status: string
+}
+
+interface PaymentFormData {
+  loanId: string
+  amount: number
+  paymentMethod: string
+  reference: string
+  notes: string
+}
+
+// Empty initial data - will be populated from API
 
 const statusColors = {
   paid: 'bg-green-100 text-green-800',
+  scheduled: 'bg-blue-100 text-blue-800',
   pending: 'bg-yellow-100 text-yellow-800',
   overdue: 'bg-red-100 text-red-800',
-  partial: 'bg-blue-100 text-blue-800'
+  partial: 'bg-purple-100 text-purple-800'
 }
 
 const statusIcons = {
   paid: CheckCircleIcon,
+  scheduled: ClockIcon,
   pending: ClockIcon,
   overdue: ExclamationTriangleIcon,
   partial: ClockIcon
 }
 
 export default function PaymentTracker() {
-  const [payments, setPayments] = useState<Payment[]>(mockPayments)
-  const [filteredPayments, setFilteredPayments] = useState<Payment[]>(mockPayments)
+  const [payments, setPayments] = useState<Payment[]>([])
+  const [filteredPayments, setFilteredPayments] = useState<Payment[]>([])
+  const [loans, setLoans] = useState<Loan[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [dateFilter, setDateFilter] = useState<string>('all')
+  const [loading, setLoading] = useState(true)
+  const [showPaymentForm, setShowPaymentForm] = useState(false)
+  const [processingPayment, setProcessingPayment] = useState(false)
+  const [paymentForm, setPaymentForm] = useState<PaymentFormData>({
+    loanId: '',
+    amount: 0,
+    paymentMethod: 'bank_transfer',
+    reference: '',
+    notes: ''
+  })
+  const { token } = useAuth()
 
+  // Fetch payments and loans data on component mount
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!token) return
+      
+      try {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+        
+        // Fetch payments
+        const paymentsResponse = await fetch(`${apiBase}/payments?t=${Date.now()}` , {
+          headers: { 'Authorization': `Bearer ${token}` },
+          cache: 'no-store'
+        })
+        
+        if (paymentsResponse.ok) {
+          const paymentsData = await paymentsResponse.json()
+          if (paymentsData.success) {
+            const mappedPayments = (paymentsData.data.payments || []).map((payment: any) => ({
+              id: payment.id,
+              loanId: payment.loanId,
+              borrowerName: payment.loan?.borrowerName || 'Unknown',
+              amount: Number(payment.amount || 0),
+              dueDate: payment.dueDate,
+              paidDate: payment.paidDate,
+              status: payment.status,
+              paymentMethod: payment.paymentMethod,
+              reference: payment.reference,
+              principal: Number(payment.principal || 0),
+              interest: Number(payment.interest || 0),
+              fees: Number(payment.fees || 0)
+            }))
+            setPayments(mappedPayments)
+          }
+        }
+
+        // Fetch loans for payment form
+        const loansResponse = await fetch(`${apiBase}/loans?t=${Date.now()}` , {
+          headers: { 'Authorization': `Bearer ${token}` },
+          cache: 'no-store'
+        })
+        
+        if (loansResponse.ok) {
+          const loansData = await loansResponse.json()
+          if (loansData.success) {
+            const mappedLoans = (loansData.data.loans || []).map((loan: any) => ({
+              id: loan.id,
+              borrowerName: loan.borrowerName,
+              loanAmount: Number(loan.loanAmount || 0),
+              status: loan.status
+            }))
+            setLoans(mappedLoans)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [token])
+
+  // Refresh loans on demand (e.g., when opening the Add Payment modal)
+  const refreshLoans = async () => {
+    if (!token) return
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+      const loansResponse = await fetch(`${apiBase}/loans?t=${Date.now()}` , {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store'
+      })
+      if (loansResponse.ok) {
+        const loansData = await loansResponse.json()
+        if (loansData.success) {
+          const mappedLoans = (loansData.data.loans || []).map((loan: any) => ({
+            id: loan.id,
+            borrowerName: loan.borrowerName,
+            loanAmount: Number(loan.loanAmount || 0),
+            status: loan.status
+          }))
+          setLoans(mappedLoans)
+        }
+      }
+    } catch (e) {
+      console.error('Error refreshing loans:', e)
+    }
+  }
+
+  // Filter payments based on search and filter criteria
   useEffect(() => {
     let filtered = payments
 
@@ -146,6 +217,105 @@ export default function PaymentTracker() {
     setFilteredPayments(filtered)
   }, [payments, searchTerm, statusFilter, dateFilter])
 
+  const handlePaymentFormChange = (field: keyof PaymentFormData, value: string | number) => {
+    setPaymentForm(prev => ({ ...prev, [field]: value }))
+  }
+
+  const handleProcessPayment = async () => {
+    if (!token || !paymentForm.loanId || paymentForm.amount <= 0) {
+      alert('Please fill in all required fields')
+      return
+    }
+
+    try {
+      setProcessingPayment(true)
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+      
+      const response = await fetch(`${apiBase}/payments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          loanId: paymentForm.loanId,
+          amount: paymentForm.amount,
+          paymentMethod: paymentForm.paymentMethod,
+          reference: paymentForm.reference,
+          notes: paymentForm.notes
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success) {
+          // Refresh both payments and loans data
+          const [paymentsResponse, loansResponse] = await Promise.all([
+            fetch(`${apiBase}/payments?t=${Date.now()}` , { headers: { 'Authorization': `Bearer ${token}` }, cache: 'no-store' }),
+            fetch(`${apiBase}/loans?t=${Date.now()}` , { headers: { 'Authorization': `Bearer ${token}` }, cache: 'no-store' })
+          ])
+          
+          if (paymentsResponse.ok) {
+            const paymentsData = await paymentsResponse.json()
+            if (paymentsData.success) {
+              const mappedPayments = (paymentsData.data.payments || []).map((payment: any) => ({
+                id: payment.id,
+                loanId: payment.loanId,
+                borrowerName: payment.loan?.borrowerName || 'Unknown',
+                amount: Number(payment.amount || 0),
+                dueDate: payment.dueDate,
+                paidDate: payment.paidDate,
+                status: payment.status,
+                paymentMethod: payment.paymentMethod,
+                reference: payment.reference,
+                principal: Number(payment.principal || 0),
+                interest: Number(payment.interest || 0),
+                fees: Number(payment.fees || 0)
+              }))
+              setPayments(mappedPayments)
+            }
+          }
+
+          if (loansResponse.ok) {
+            const loansData = await loansResponse.json()
+            if (loansData.success) {
+              const mappedLoans = (loansData.data.loans || []).map((loan: any) => ({
+                id: loan.id,
+                borrowerName: loan.borrowerName,
+                loanAmount: Number(loan.loanAmount || 0),
+                status: loan.status
+              }))
+              setLoans(mappedLoans)
+            }
+          }
+          
+          // Reset form and close modal
+          setPaymentForm({
+            loanId: '',
+            amount: 0,
+            paymentMethod: 'bank_transfer',
+            reference: '',
+            notes: ''
+          })
+          setShowPaymentForm(false)
+          
+          // Trigger refresh of other components
+          window.dispatchEvent(new CustomEvent('paymentProcessed'))
+          
+          alert('Payment processed successfully!')
+        }
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.error?.message || 'Failed to process payment')
+      }
+    } catch (error) {
+      console.error('Error processing payment:', error)
+      alert((error as Error).message)
+    } finally {
+      setProcessingPayment(false)
+    }
+  }
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -162,12 +332,13 @@ export default function PaymentTracker() {
 
   const exportPayments = () => {
     const csvContent = [
-      ['Loan ID', 'Borrower', 'Amount', 'Due Date', 'Status', 'Payment Method', 'Reference'],
+      ['Loan ID', 'Borrower', 'Amount', 'Due Date', 'Paid Date', 'Status', 'Payment Method', 'Reference'],
       ...filteredPayments.map(payment => [
         payment.loanId,
         payment.borrowerName,
         payment.amount.toString(),
         format(new Date(payment.dueDate), 'MM/dd/yyyy'),
+        payment.paidDate ? format(new Date(payment.paidDate), 'MM/dd/yyyy') : '',
         payment.status,
         payment.paymentMethod || '',
         payment.reference || ''
@@ -183,35 +354,87 @@ export default function PaymentTracker() {
     window.URL.revokeObjectURL(url)
   }
 
-  const totalAmount = filteredPayments.reduce((sum, payment) => sum + payment.amount, 0)
+  // Calculate outstanding loan amounts
+  const calculateOutstandingAmount = () => {
+    const loanOutstandingMap = new Map<string, number>()
+    
+    // Initialize with original loan amounts
+    loans.forEach(loan => {
+      if (loan.status === 'active' || loan.status === 'approved') {
+        loanOutstandingMap.set(loan.id, loan.loanAmount)
+      }
+    })
+    
+    // Subtract paid principal from each loan
+    payments.forEach(payment => {
+      if (payment.status === 'paid') {
+        const currentOutstanding = loanOutstandingMap.get(payment.loanId) || 0
+        loanOutstandingMap.set(payment.loanId, Math.max(0, currentOutstanding - payment.principal))
+      }
+    })
+    
+    return Array.from(loanOutstandingMap.values()).reduce((sum, amount) => sum + amount, 0)
+  }
+
+  const outstandingAmount = calculateOutstandingAmount()
   const paidAmount = filteredPayments
     .filter(payment => payment.status === 'paid')
     .reduce((sum, payment) => sum + payment.amount, 0)
-  const pendingAmount = filteredPayments
-    .filter(payment => payment.status === 'pending')
+  const scheduledAmount = filteredPayments
+    .filter(payment => payment.status === 'scheduled')
     .reduce((sum, payment) => sum + payment.amount, 0)
   const overdueAmount = filteredPayments
     .filter(payment => payment.status === 'overdue')
     .reduce((sum, payment) => sum + payment.amount, 0)
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
+  if (loading) {
+    return (
+      <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Payment Tracker</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Monitor and manage loan payments in real-time
-          </p>
+          <p className="mt-1 text-sm text-gray-500">Loading payment data...</p>
         </div>
-        <button
-          onClick={exportPayments}
-          className="btn btn-secondary flex items-center gap-2"
-        >
-          <ArrowDownTrayIcon className="h-4 w-4" />
-          Export
-        </button>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="card p-6 animate-pulse">
+              <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+              <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          ))}
+        </div>
       </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+          {/* Header */}
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Payment Tracker</h1>
+              <p className="mt-1 text-sm text-gray-500">
+                Monitor and manage loan payments in real-time
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={async () => { await refreshLoans(); setShowPaymentForm(true) }}
+                className="btn btn-primary flex items-center gap-2"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add Payment
+              </button>
+              {payments.length > 0 && (
+                <button
+                  onClick={exportPayments}
+                  className="btn btn-secondary flex items-center gap-2"
+                >
+                  <ArrowDownTrayIcon className="h-4 w-4" />
+                  Export
+                </button>
+              )}
+            </div>
+          </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -223,9 +446,9 @@ export default function PaymentTracker() {
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total Amount</p>
+              <p className="text-sm font-medium text-gray-500">Outstanding loan amounts</p>
               <p className="text-2xl font-semibold text-gray-900">
-                {formatCurrency(totalAmount)}
+                {formatCurrency(outstandingAmount)}
               </p>
             </div>
           </div>
@@ -250,14 +473,14 @@ export default function PaymentTracker() {
         <div className="card p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <div className="h-8 w-8 rounded-full bg-yellow-100 flex items-center justify-center">
-                <ClockIcon className="h-4 w-4 text-yellow-600" />
+              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                <ClockIcon className="h-4 w-4 text-blue-600" />
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Pending</p>
+              <p className="text-sm font-medium text-gray-500">Scheduled</p>
               <p className="text-2xl font-semibold text-gray-900">
-                {formatCurrency(pendingAmount)}
+                {formatCurrency(scheduledAmount)}
               </p>
             </div>
           </div>
@@ -304,6 +527,7 @@ export default function PaymentTracker() {
             >
               <option value="all">All Status</option>
               <option value="paid">Paid</option>
+              <option value="scheduled">Scheduled</option>
               <option value="pending">Pending</option>
               <option value="overdue">Overdue</option>
               <option value="partial">Partial</option>
@@ -343,6 +567,9 @@ export default function PaymentTracker() {
                   Due Date
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Paid Date
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -375,6 +602,9 @@ export default function PaymentTracker() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {format(new Date(payment.dueDate), 'MMM dd, yyyy')}
                   </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {payment.paidDate ? format(new Date(payment.paidDate), 'MMM dd, yyyy') : '-'}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[payment.status]}`}>
                       {getStatusIcon(payment.status)}
@@ -395,7 +625,23 @@ export default function PaymentTracker() {
           </table>
         </div>
 
-        {filteredPayments.length === 0 && (
+        {payments.length === 0 ? (
+          <div className="text-center py-12">
+            <ClockIcon className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No payments yet</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Payments will appear here once you create loans and they generate payment schedules.
+            </p>
+            <div className="mt-6">
+              <a
+                href="/loans/create"
+                className="btn btn-primary"
+              >
+                Create Loan
+              </a>
+            </div>
+          </div>
+        ) : filteredPayments.length === 0 ? (
           <div className="text-center py-12">
             <FunnelIcon className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No payments found</h3>
@@ -403,8 +649,116 @@ export default function PaymentTracker() {
               Try adjusting your search criteria or filters.
             </p>
           </div>
-        )}
+        ) : null}
       </div>
+
+      {/* Payment Form Modal */}
+      {showPaymentForm && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-screen items-center justify-center p-4">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowPaymentForm(false)} />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full">
+              <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">Process Payment</h3>
+                <button
+                  onClick={() => setShowPaymentForm(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <XMarkIcon className="h-6 w-6" />
+                </button>
+              </div>
+              
+              <form className="p-6 space-y-4">
+                <div>
+                  <label className="label">Loan</label>
+                  <select
+                    value={paymentForm.loanId}
+                    onChange={(e) => handlePaymentFormChange('loanId', e.target.value)}
+                    className="input"
+                    required
+                  >
+                    <option value="">Select a loan</option>
+                    {loans.filter(loan => loan.status === 'active' || loan.status === 'approved').map(loan => (
+                      <option key={loan.id} value={loan.id}>
+                        {loan.borrowerName} - {formatCurrency(loan.loanAmount)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label">Amount</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={paymentForm.amount || ''}
+                    onChange={(e) => handlePaymentFormChange('amount', parseFloat(e.target.value) || 0)}
+                    className="input"
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="label">Payment Method</label>
+                  <select
+                    value={paymentForm.paymentMethod}
+                    onChange={(e) => handlePaymentFormChange('paymentMethod', e.target.value)}
+                    className="input"
+                  >
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="ach">ACH</option>
+                    <option value="wire">Wire Transfer</option>
+                    <option value="check">Check</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label">Reference</label>
+                  <input
+                    type="text"
+                    value={paymentForm.reference}
+                    onChange={(e) => handlePaymentFormChange('reference', e.target.value)}
+                    className="input"
+                    placeholder="Payment reference number"
+                  />
+                </div>
+
+                <div>
+                  <label className="label">Notes</label>
+                  <textarea
+                    value={paymentForm.notes}
+                    onChange={(e) => handlePaymentFormChange('notes', e.target.value)}
+                    className="input"
+                    rows={3}
+                    placeholder="Additional notes about this payment"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentForm(false)}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleProcessPayment}
+                    disabled={processingPayment || !paymentForm.loanId || paymentForm.amount <= 0}
+                    className="btn btn-primary"
+                  >
+                    {processingPayment ? 'Processing...' : 'Process Payment'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
