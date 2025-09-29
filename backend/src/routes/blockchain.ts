@@ -116,9 +116,24 @@ router.post('/keplr/confirm', authenticateToken, async (req, res) => {
       })
     }
 
-    // Query tx details from MCP (stub that returns rich metadata)
-    const txResp = await axios.get(`${MCP_BASE_URL}/tools/provenance/transaction/${txHash}`)
-    const data = txResp.data || {}
+    // Fetch real transaction from Provenance LCD to parse the actual memo
+    const PROV_API = process.env.PROVENANCE_LCD || 'https://api.test.provenance.io'
+    let memoFromChain: string | null = null
+    try {
+      const lcdResp = await axios.get(`${PROV_API}/cosmos/tx/v1beta1/txs/${txHash}`)
+      // Prefer nested path; different LCDs return memo under either tx.body.memo or txResponse.tx.body.memo
+      memoFromChain = lcdResp.data?.tx?.body?.memo || lcdResp.data?.txResponse?.tx?.body?.memo || null
+    } catch (lcdErr) {
+      console.warn('LCD fetch failed, falling back to MCP stub for memo:', lcdErr)
+    }
+
+    // Fallback to MCP stub if LCD memo not available
+    let data: any = {}
+    if (!memoFromChain) {
+      const txResp = await axios.get(`${MCP_BASE_URL}/tools/provenance/transaction/${txHash}`)
+      data = txResp.data || {}
+      memoFromChain = data.memo || null
+    }
 
     // Parse Provenance identifiers from the transaction memo
     let provenanceScopeId: string | null = null
@@ -126,8 +141,8 @@ router.post('/keplr/confirm', authenticateToken, async (req, res) => {
     let provenanceRecordId: string | null = null
     let provenanceMetadataHash: string | null = null
 
-    if (data.memo) {
-      const memo = data.memo
+    if (memoFromChain) {
+      const memo = memoFromChain
       // Parse memo format: PROV_LOAN:loanId|SCOPE:scopeId|SESSION:sessionId|RECORD:recordId|HASH:hash
       const scopeMatch = memo.match(/SCOPE:([^|]+)/)
       const sessionMatch = memo.match(/SESSION:([^|]+)/)
