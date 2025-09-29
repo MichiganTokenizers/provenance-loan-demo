@@ -1,10 +1,12 @@
 import express from 'express'
 import Joi from 'joi'
+import axios from 'axios'
 import { PrismaClient } from '@prisma/client'
 import { authenticateToken } from '../middleware/auth'
 
 const router = express.Router()
 const prisma = new PrismaClient()
+const MCP_BASE_URL = process.env.MCP_BASE_URL || 'http://localhost:6060'
 
 // Validation schemas
 const processPaymentSchema = Joi.object({
@@ -231,11 +233,30 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     })
 
+    // 1b) On-chain ledger post for scheduled portion
+    try {
+      const postResp = await axios.post(`${MCP_BASE_URL}/tools/provenance/ledger/post`, {
+        ledgerId: loan.blockchainLedgerId,
+        type: 'PAYMENT',
+        amount: nextAmountDue,
+        memo: `Scheduled payment for ${loan.id} / ${paidNextPayment.id}`,
+        refIds: { loanId: loan.id, paymentId: paidNextPayment.id }
+      })
+      const entryId = postResp.data?.entryId || postResp.data?.data?.entryId || null
+      const txHash = postResp.data?.txHash || postResp.data?.data?.txHash || null
+      await prisma.payment.update({
+        where: { id: paidNextPayment.id },
+        data: { blockchainTransactionHash: txHash, blockchainLedgerEntryId: entryId }
+      })
+    } catch (e) {
+      console.error('On-chain ledger post (scheduled) failed:', e)
+    }
+
     // 2) Apply any extra amount as principal prepayment and re-amortize
     const extraPrincipal = amount - nextAmountDue
     if (extraPrincipal > 0) {
       // Record the principal reduction as its own paid payment row
-      await prisma.payment.create({
+      const principalPayment = await prisma.payment.create({
         data: {
           loanId,
           amount: extraPrincipal,
@@ -251,6 +272,25 @@ router.post('/', authenticateToken, async (req, res) => {
           notes: notes ? `${notes} (Principal reduction)` : 'Principal reduction'
         }
       })
+
+      // 2b) On-chain ledger post for principal prepayment
+      try {
+        const postResp2 = await axios.post(`${MCP_BASE_URL}/tools/provenance/ledger/post`, {
+          ledgerId: loan.blockchainLedgerId,
+          type: 'PAYMENT',
+          amount: extraPrincipal,
+          memo: `Principal prepayment for ${loan.id} / ${principalPayment.id}`,
+          refIds: { loanId: loan.id, paymentId: principalPayment.id }
+        })
+        const entryId2 = postResp2.data?.entryId || postResp2.data?.data?.entryId || null
+        const txHash2 = postResp2.data?.txHash || postResp2.data?.data?.txHash || null
+        await prisma.payment.update({
+          where: { id: principalPayment.id },
+          data: { blockchainTransactionHash: txHash2, blockchainLedgerEntryId: entryId2 }
+        })
+      } catch (e) {
+        console.error('On-chain ledger post (principal) failed:', e)
+      }
 
       // Load all payments for this loan
       const allPayments = await prisma.payment.findMany({

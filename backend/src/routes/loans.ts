@@ -1,10 +1,12 @@
 import express from 'express'
 import Joi from 'joi'
+import axios from 'axios'
 import { PrismaClient } from '@prisma/client'
 import { authenticateToken } from '../middleware/auth'
 
 const router = express.Router()
 const prisma = new PrismaClient()
+const MCP_BASE_URL = process.env.MCP_BASE_URL || 'http://localhost:6060'
 
 // Validation schemas
 const createLoanSchema = Joi.object({
@@ -225,10 +227,63 @@ router.post('/', authenticateToken, async (req, res) => {
       data: payments
     })
 
-    res.status(201).json({
-      success: true,
-      data: { loan }
-    })
+    // --- On-chain: register asset, create ledger, assign registry ---
+    try {
+      // Register asset on-chain with minimal metadata
+      const registerResp = await axios.post(`${MCP_BASE_URL}/tools/provenance/asset`, {
+        assetClassId: 'simulated_asset_class_loan',
+        externalRef: loan.id,
+        metadata: {
+          borrowerName,
+          loanAmount,
+          interestRate,
+          loanTerm,
+          createdAt: loan.createdAt
+        }
+      })
+      const assetId = registerResp.data?.assetId || registerResp.data?.data?.assetId || null
+      const txHash1 = registerResp.data?.txHash || registerResp.data?.data?.txHash || null
+
+      // Create ledger for the asset
+      const ledgerResp = await axios.post(`${MCP_BASE_URL}/tools/provenance/ledger/create`, {
+        assetId,
+        denomination: 'USD'
+      })
+      const ledgerId = ledgerResp.data?.ledgerId || ledgerResp.data?.data?.ledgerId || null
+      const txHash2 = ledgerResp.data?.txHash || ledgerResp.data?.data?.txHash || null
+
+      // Assign roles in registry (stubbed)
+      const registryResp = await axios.post(`${MCP_BASE_URL}/tools/provenance/registry/assign`, {
+        assetId,
+        roles: { lender: 'bank', servicer: 'bank', borrower: borrowerName }
+      })
+      const registryId = registryResp.data?.registryId || registryResp.data?.data?.registryId || null
+      const txHash3 = registryResp.data?.txHash || registryResp.data?.data?.txHash || null
+
+      // Persist blockchain identifiers
+      const updatedOnchainLoan = await prisma.loan.update({
+        where: { id: loan.id },
+        data: {
+          blockchainAssetId: assetId,
+          blockchainTransactionHash: txHash3 || txHash2 || txHash1,
+          blockchainLedgerId: ledgerId,
+          blockchainRegistryId: registryId
+        },
+        include: { collateral: true }
+      })
+
+      return res.status(201).json({
+        success: true,
+        data: { loan: updatedOnchainLoan }
+      })
+    } catch (chainError) {
+      console.error('On-chain setup failed, loan remains off-chain:', chainError)
+      // Return created loan even if on-chain wiring failed
+      return res.status(201).json({
+        success: true,
+        data: { loan }
+      })
+    }
   } catch (error) {
     console.error('Create loan error:', error)
     res.status(500).json({

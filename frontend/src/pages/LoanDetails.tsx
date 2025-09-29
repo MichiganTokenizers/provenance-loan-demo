@@ -55,18 +55,32 @@ interface Payment {
 }
 
 const buildPaymentHistoryFromPayments = (payments: Payment[]) => {
-  // Aggregate by month label for a small chart
+  // Aggregate by month; split into paid vs scheduled series
   const formatter = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' })
-  const byMonth: Record<string, { amount: number; principal: number; interest: number }> = {}
+  const byMonth: Record<string, {
+    amountPaid: number;
+    amountScheduled: number;
+    principal: number;
+    interest: number;
+  }> = {}
+
   payments.forEach(p => {
     const key = formatter.format(new Date(p.dueDate))
     if (!byMonth[key]) {
-      byMonth[key] = { amount: 0, principal: 0, interest: 0 }
+      byMonth[key] = { amountPaid: 0, amountScheduled: 0, principal: 0, interest: 0 }
     }
-    byMonth[key].amount += Number(p.amount || 0)
-    byMonth[key].principal += Number(p.principal || 0)
-    byMonth[key].interest += Number(p.interest || 0)
+    const amt = Number(p.amount || 0)
+    const principal = Number(p.principal || 0)
+    const interest = Number(p.interest || 0)
+    if (p.status === 'paid') {
+      byMonth[key].amountPaid += amt
+    } else {
+      byMonth[key].amountScheduled += amt
+    }
+    byMonth[key].principal += principal
+    byMonth[key].interest += interest
   })
+
   return Object.entries(byMonth).map(([month, v]) => ({ month, ...v }))
 }
 
@@ -358,7 +372,12 @@ export default function LoanDetails() {
               <div className="flex justify-between">
                 <span className="text-sm text-gray-500">Due Date</span>
                 <span className="text-sm font-medium text-gray-900">
-                  {new Date(payments.find(p => p.status === 'pending')?.dueDate || '').toLocaleDateString()}
+                  {(() => {
+                    const next = [...payments]
+                      .filter(p => p.status === 'scheduled')
+                      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0]
+                    return next ? new Date(next.dueDate).toLocaleDateString() : '-'
+                  })()}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -404,8 +423,9 @@ export default function LoanDetails() {
               <XAxis dataKey="month" />
               <YAxis />
               <Tooltip formatter={(value, name) => [formatCurrency(Number(value)), name]} />
-              <Line type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} name="Total Payment" />
-              <Line type="monotone" dataKey="principal" stroke="#10b981" strokeWidth={2} name="Principal" />
+              <Line type="monotone" dataKey="amountPaid" stroke="#16a34a" strokeWidth={2} name="Total Payment (Paid)" dot={{ r: 3, strokeWidth: 0, fill: '#16a34a' }} activeDot={{ r: 5, strokeWidth: 0, fill: '#16a34a' }} />
+              <Line type="monotone" dataKey="amountScheduled" stroke="#3b82f6" strokeWidth={2} strokeDasharray="6 6" name="Total Payment (Scheduled)" dot={{ r: 3, stroke: '#3b82f6', strokeWidth: 2, fill: '#ffffff' }} activeDot={{ r: 5, stroke: '#3b82f6', strokeWidth: 2, fill: '#ffffff' }} />
+              <Line type="monotone" dataKey="principal" stroke="#7c3aed" strokeWidth={2} name="Principal" />
               <Line type="monotone" dataKey="interest" stroke="#f59e0b" strokeWidth={2} name="Interest" />
             </LineChart>
           </ResponsiveContainer>
