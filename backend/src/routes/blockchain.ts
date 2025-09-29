@@ -120,13 +120,35 @@ router.post('/keplr/confirm', authenticateToken, async (req, res) => {
     const txResp = await axios.get(`${MCP_BASE_URL}/tools/provenance/transaction/${txHash}`)
     const data = txResp.data || {}
 
-    // Persist identifiers we can derive from the prepared response
-    // Note: mcp prepare returned assetId and ledger ids; we may not have them here.
-    // For now, store tx hash; front-end can POST assetId if needed in future.
+    // Parse Provenance identifiers from the transaction memo
+    let provenanceScopeId: string | null = null
+    let provenanceSessionId: string | null = null
+    let provenanceRecordId: string | null = null
+    let provenanceMetadataHash: string | null = null
+
+    if (data.memo) {
+      const memo = data.memo
+      // Parse memo format: PROV_LOAN:loanId|SCOPE:scopeId|SESSION:sessionId|RECORD:recordId|HASH:hash
+      const scopeMatch = memo.match(/SCOPE:([^|]+)/)
+      const sessionMatch = memo.match(/SESSION:([^|]+)/)
+      const recordMatch = memo.match(/RECORD:([^|]+)/)
+      const hashMatch = memo.match(/HASH:([^|]+)/)
+
+      if (scopeMatch) provenanceScopeId = scopeMatch[1]
+      if (sessionMatch) provenanceSessionId = sessionMatch[1]
+      if (recordMatch) provenanceRecordId = recordMatch[1]
+      if (hashMatch) provenanceMetadataHash = hashMatch[1]
+    }
+
+    // Persist transaction hash and Provenance identifiers
     const updated = await prisma.loan.update({
       where: { id: loanId },
       data: {
-        blockchainTransactionHash: txHash
+        blockchainTransactionHash: txHash,
+        provenanceScopeId,
+        provenanceSessionId,
+        provenanceRecordId,
+        provenanceMetadataHash
       },
       include: { collateral: true }
     })

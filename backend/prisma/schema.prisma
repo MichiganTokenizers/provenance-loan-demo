@@ -49,6 +49,12 @@ model Loan {
   blockchainLedgerId        String?
   blockchainRegistryId      String?
   
+  // Provenance-specific fields
+  provenanceScopeId         String?
+  provenanceSessionId       String?
+  provenanceRecordId        String?
+  provenanceMetadataHash    String?
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

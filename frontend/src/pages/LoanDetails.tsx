@@ -39,6 +39,10 @@ interface Loan {
     assetId?: string | null
     contractAddress?: string | null
     transactionHash?: string | null
+    provenanceScopeId?: string | null
+    provenanceSessionId?: string | null
+    provenanceRecordId?: string | null
+    provenanceMetadataHash?: string | null
   }
 }
 
@@ -135,7 +139,11 @@ export default function LoanDetails() {
           blockchain: {
             assetId: b.blockchainAssetId || null,
             contractAddress: b.blockchainContractAddress || null,
-            transactionHash: b.blockchainTransactionHash || null
+            transactionHash: b.blockchainTransactionHash || null,
+            provenanceScopeId: b.provenanceScopeId || null,
+            provenanceSessionId: b.provenanceSessionId || null,
+            provenanceRecordId: b.provenanceRecordId || null,
+            provenanceMetadataHash: b.provenanceMetadataHash || null
           }
         }
 
@@ -490,6 +498,30 @@ export default function LoanDetails() {
                 <dt className="text-sm font-medium text-gray-500">Transaction Hash</dt>
                 <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain?.transactionHash || '-'}</dd>
               </div>
+              {loan.blockchain?.provenanceScopeId && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-500">Provenance Scope ID</dt>
+                  <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain.provenanceScopeId}</dd>
+                </div>
+              )}
+              {loan.blockchain?.provenanceSessionId && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-500">Provenance Session ID</dt>
+                  <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain.provenanceSessionId}</dd>
+                </div>
+              )}
+              {loan.blockchain?.provenanceRecordId && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-500">Provenance Record ID</dt>
+                  <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain.provenanceRecordId}</dd>
+                </div>
+              )}
+              {loan.blockchain?.provenanceMetadataHash && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-500">Metadata Hash</dt>
+                  <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain.provenanceMetadataHash}</dd>
+                </div>
+              )}
             </div>
           </div>
         </div>

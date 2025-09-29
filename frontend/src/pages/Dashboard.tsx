@@ -27,6 +27,15 @@ interface RecentLoan {
   amount: number
   status: 'active' | 'pending' | 'completed' | 'defaulted' | 'approved'
   createdAt: string
+  blockchain?: {
+    assetId?: string | null
+    contractAddress?: string | null
+    transactionHash?: string | null
+    provenanceScopeId?: string | null
+    provenanceSessionId?: string | null
+    provenanceRecordId?: string | null
+    provenanceMetadataHash?: string | null
+  }
 }
 
 // Empty initial data - will be populated from API
@@ -71,7 +80,16 @@ export default function Dashboard() {
               borrowerName: loan.borrowerName,
               amount: Number(loan.loanAmount || 0),
               status: loan.status,
-              createdAt: loan.createdAt
+              createdAt: loan.createdAt,
+              blockchain: {
+                assetId: loan.blockchainAssetId || null,
+                contractAddress: loan.blockchainContractAddress || null,
+                transactionHash: loan.blockchainTransactionHash || null,
+                provenanceScopeId: loan.provenanceScopeId || null,
+                provenanceSessionId: loan.provenanceSessionId || null,
+                provenanceRecordId: loan.provenanceRecordId || null,
+                provenanceMetadataHash: loan.provenanceMetadataHash || null
+              }
             }))
             setRecentLoans(mappedRecentLoans)
             
