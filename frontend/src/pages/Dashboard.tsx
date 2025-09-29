@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { 
   BanknotesIcon, 
@@ -302,7 +303,9 @@ export default function Dashboard() {
                 {recentLoans.map((loan) => (
                   <tr key={loan.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {loan.borrowerName}
+                      <Link to={`/loans/${loan.id}`} className="text-primary-600 hover:text-primary-700 hover:underline">
+                        {loan.borrowerName}
+                      </Link>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {formatCurrency(loan.amount)}

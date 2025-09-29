@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { 
   ArrowLeftIcon,
   DocumentTextIcon,
@@ -22,21 +23,21 @@ interface Loan {
   amount: number
   interestRate: number
   term: number
-  status: 'active' | 'pending' | 'completed' | 'defaulted'
+  status: 'active' | 'pending' | 'completed' | 'defaulted' | 'approved'
   createdAt: string
   collateral: {
     type: string
     value: number
     description: string
-  }
+  } | null
   loanPurpose: string
   monthlyPayment: number
   totalInterest: number
   totalAmount: number
-  blockchain: {
-    assetId: string
-    contractAddress: string
-    transactionHash: string
+  blockchain?: {
+    assetId?: string | null
+    contractAddress?: string | null
+    transactionHash?: string | null
   }
 }
 
@@ -48,107 +49,104 @@ interface Payment {
   fees: number
   dueDate: string
   paidDate?: string
-  status: 'paid' | 'pending' | 'overdue'
+  status: 'paid' | 'pending' | 'overdue' | 'scheduled'
   paymentMethod?: string
   reference?: string
 }
 
-const mockLoan: Loan = {
-  id: 'LOAN-001',
-  borrowerName: 'John Smith',
-  borrowerEmail: 'john.smith@email.com',
-  borrowerPhone: '(555) 123-4567',
-  amount: 250000,
-  interestRate: 5.5,
-  term: 360,
-  status: 'active',
-  createdAt: '2024-01-15T10:30:00Z',
-  collateral: {
-    type: 'real_estate',
-    value: 350000,
-    description: 'Residential property located at 123 Main St, Anytown, USA'
-  },
-  loanPurpose: 'Home purchase for primary residence',
-  monthlyPayment: 1418.72,
-  totalInterest: 260739.20,
-  totalAmount: 510739.20,
-  blockchain: {
-    assetId: 'provenance_asset_12345',
-    contractAddress: '0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6',
-    transactionHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
-  }
+const buildPaymentHistoryFromPayments = (payments: Payment[]) => {
+  // Aggregate by month label for a small chart
+  const formatter = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' })
+  const byMonth: Record<string, { amount: number; principal: number; interest: number }> = {}
+  payments.forEach(p => {
+    const key = formatter.format(new Date(p.dueDate))
+    if (!byMonth[key]) {
+      byMonth[key] = { amount: 0, principal: 0, interest: 0 }
+    }
+    byMonth[key].amount += Number(p.amount || 0)
+    byMonth[key].principal += Number(p.principal || 0)
+    byMonth[key].interest += Number(p.interest || 0)
+  })
+  return Object.entries(byMonth).map(([month, v]) => ({ month, ...v }))
 }
-
-const mockPayments: Payment[] = [
-  {
-    id: '1',
-    amount: 1418.72,
-    principal: 283.22,
-    interest: 1145.83,
-    fees: 0,
-    dueDate: '2024-02-15T00:00:00Z',
-    paidDate: '2024-02-14T10:30:00Z',
-    status: 'paid',
-    paymentMethod: 'Bank Transfer',
-    reference: 'TXN123456'
-  },
-  {
-    id: '2',
-    amount: 1418.72,
-    principal: 284.52,
-    interest: 1144.53,
-    fees: 0,
-    dueDate: '2024-03-15T00:00:00Z',
-    paidDate: '2024-03-14T09:15:00Z',
-    status: 'paid',
-    paymentMethod: 'ACH',
-    reference: 'TXN789012'
-  },
-  {
-    id: '3',
-    amount: 1418.72,
-    principal: 285.82,
-    interest: 1143.23,
-    fees: 0,
-    dueDate: '2024-04-15T00:00:00Z',
-    status: 'pending'
-  },
-  {
-    id: '4',
-    amount: 1418.72,
-    principal: 287.13,
-    interest: 1141.92,
-    fees: 0,
-    dueDate: '2024-05-15T00:00:00Z',
-    status: 'pending'
-  }
-]
-
-const mockPaymentHistory = [
-  { month: 'Jan 2024', amount: 1418.72, principal: 281.92, interest: 1146.83 },
-  { month: 'Feb 2024', amount: 1418.72, principal: 283.22, interest: 1145.83 },
-  { month: 'Mar 2024', amount: 1418.72, principal: 284.52, interest: 1144.53 },
-  { month: 'Apr 2024', amount: 1418.72, principal: 285.82, interest: 1143.23 },
-]
 
 export default function LoanDetails() {
   const { id } = useParams<{ id: string }>()
   const [loan, setLoan] = useState<Loan | null>(null)
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
+  const { token } = useAuth()
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Simulate API call
     const fetchLoanDetails = async () => {
-      setLoading(true)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      setLoan(mockLoan)
-      setPayments(mockPayments)
-      setLoading(false)
+      if (!id || !token) return
+      try {
+        setLoading(true)
+        setError(null)
+        const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+        const res = await fetch(`${apiBase}/loans/${id}?t=${Date.now()}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          cache: 'no-store'
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err?.error?.message || 'Failed to fetch loan')
+        }
+        const data = await res.json()
+        const b = data.data.loan
+
+        const mappedLoan: Loan = {
+          id: b.id,
+          borrowerName: b.borrowerName,
+          borrowerEmail: b.borrowerEmail,
+          borrowerPhone: b.borrowerPhone,
+          amount: Number(b.loanAmount || 0),
+          interestRate: Number(b.interestRate || 0),
+          term: Number(b.loanTerm || 0),
+          status: b.status,
+          createdAt: b.createdAt,
+          collateral: b.collateral ? {
+            type: b.collateral.type,
+            value: Number(b.collateral.value || 0),
+            description: b.collateral.description
+          } : null,
+          loanPurpose: b.loanPurpose || '',
+          monthlyPayment: Number(b.monthlyPayment || 0),
+          totalInterest: Number(b.totalInterest || 0),
+          totalAmount: Number(b.totalAmount || 0),
+          blockchain: {
+            assetId: b.blockchainAssetId || null,
+            contractAddress: b.blockchainContractAddress || null,
+            transactionHash: b.blockchainTransactionHash || null
+          }
+        }
+
+        const mappedPayments: Payment[] = (b.payments || []).map((p: any) => ({
+          id: p.id,
+          amount: Number(p.amount || 0),
+          principal: Number(p.principal || 0),
+          interest: Number(p.interest || 0),
+          fees: Number(p.fees || 0),
+          dueDate: p.dueDate,
+          paidDate: p.paidDate || undefined,
+          status: p.status as Payment['status'],
+          paymentMethod: p.paymentMethod || undefined,
+          reference: p.reference || undefined
+        }))
+
+        setLoan(mappedLoan)
+        setPayments(mappedPayments)
+      } catch (e) {
+        console.error('Loan details fetch failed:', e)
+        setError((e as Error).message)
+      } finally {
+        setLoading(false)
+      }
     }
 
     fetchLoanDetails()
-  }, [id])
+  }, [id, token])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -169,6 +167,8 @@ export default function LoanDetails() {
         return 'bg-blue-100 text-blue-800'
       case 'defaulted':
         return 'bg-red-100 text-red-800'
+      case 'approved':
+        return 'bg-purple-100 text-purple-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -182,6 +182,8 @@ export default function LoanDetails() {
         return 'bg-yellow-100 text-yellow-800'
       case 'overdue':
         return 'bg-red-100 text-red-800'
+      case 'scheduled':
+        return 'bg-yellow-100 text-yellow-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -204,6 +206,16 @@ export default function LoanDetails() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-400" />
+        <h3 className="mt-2 text-sm font-medium text-gray-900">Failed to load loan</h3>
+        <p className="mt-1 text-sm text-gray-500">{error}</p>
       </div>
     )
   }
@@ -314,15 +326,15 @@ export default function LoanDetails() {
             <dl className="space-y-2">
               <div>
                 <dt className="text-sm font-medium text-gray-500">Type</dt>
-                <dd className="text-sm text-gray-900 capitalize">{loan.collateral.type.replace('_', ' ')}</dd>
+                <dd className="text-sm text-gray-900 capitalize">{loan.collateral?.type?.replace('_', ' ') || '-'}</dd>
               </div>
               <div>
                 <dt className="text-sm font-medium text-gray-500">Value</dt>
-                <dd className="text-sm text-gray-900">{formatCurrency(loan.collateral.value)}</dd>
+                <dd className="text-sm text-gray-900">{loan.collateral ? formatCurrency(loan.collateral.value) : '-'}</dd>
               </div>
               <div>
                 <dt className="text-sm font-medium text-gray-500">Description</dt>
-                <dd className="text-sm text-gray-900">{loan.collateral.description}</dd>
+                <dd className="text-sm text-gray-900">{loan.collateral?.description || '-'}</dd>
               </div>
             </dl>
           </div>
@@ -367,15 +379,15 @@ export default function LoanDetails() {
             <div className="space-y-3">
               <div>
                 <dt className="text-sm font-medium text-gray-500">Asset ID</dt>
-                <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain.assetId}</dd>
+                <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain?.assetId || '-'}</dd>
               </div>
               <div>
                 <dt className="text-sm font-medium text-gray-500">Contract Address</dt>
-                <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain.contractAddress}</dd>
+                <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain?.contractAddress || '-'}</dd>
               </div>
               <div>
                 <dt className="text-sm font-medium text-gray-500">Transaction Hash</dt>
-                <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain.transactionHash}</dd>
+                <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain?.transactionHash || '-'}</dd>
               </div>
             </div>
           </div>
@@ -387,7 +399,7 @@ export default function LoanDetails() {
         <h3 className="text-lg font-medium text-gray-900 mb-4">Payment History</h3>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={mockPaymentHistory}>
+            <LineChart data={buildPaymentHistoryFromPayments(payments)}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="month" />
               <YAxis />
