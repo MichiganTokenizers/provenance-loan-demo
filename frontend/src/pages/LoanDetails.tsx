@@ -14,6 +14,7 @@ import {
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { prepareLoanAssetForKeplr, signAndBroadcastWithKeplr, confirmBroadcastedTx } from '../services/blockchain'
 
 interface Loan {
   id: string
@@ -91,6 +92,8 @@ export default function LoanDetails() {
   const [loading, setLoading] = useState(true)
   const { token } = useAuth()
   const [error, setError] = useState<string | null>(null)
+  const [approving, setApproving] = useState(false)
+  const [approveError, setApproveError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchLoanDetails = async () => {
@@ -169,6 +172,70 @@ export default function LoanDetails() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount)
+  }
+
+  const handleApproveAndBroadcast = async () => {
+    if (!loan || !token) return
+    try {
+      setApproving(true)
+      setApproveError(null)
+
+      // Ensure Keplr account on Provenance testnet to obtain borrower address
+      const defaultChainId = 'pio-testnet-1'
+      if (!window.keplr || !window.getOfflineSignerAuto) {
+        throw new Error('Keplr wallet not detected')
+      }
+      await window.keplr.enable(defaultChainId)
+      const signer = await window.getOfflineSignerAuto(defaultChainId)
+      const accounts = await signer.getAccounts()
+      const borrowerAddress = accounts[0]?.address
+      if (!borrowerAddress) throw new Error('No account in Keplr')
+
+      // Prepare messages
+      const prepared = await prepareLoanAssetForKeplr({
+        token,
+        loanId: loan.id,
+        borrowerAddress,
+        metadata: {
+          borrowerName: loan.borrowerName,
+          loanAmount: Number(loan.amount),
+          interestRate: Number(loan.interestRate),
+          loanTerm: Number(loan.term),
+          createdAt: loan.createdAt
+        }
+      })
+
+      // Sign and broadcast
+      const txHash = await signAndBroadcastWithKeplr(
+        prepared.chainId,
+        prepared.rpc,
+        prepared.messages,
+        prepared.fee,
+        prepared.memo
+      )
+
+      // Confirm and persist
+      await confirmBroadcastedTx({ token, loanId: loan.id, txHash })
+
+      // Update loan status to approved
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+      await fetch(`${apiBase}/loans/${loan.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: 'approved' })
+      })
+
+      // Refresh details
+      window.location.reload()
+    } catch (e) {
+      console.error('Approve and broadcast failed:', e)
+      setApproveError((e as Error).message)
+    } finally {
+      setApproving(false)
+    }
   }
 
   const getStatusColor = (status: string) => {
@@ -262,9 +329,21 @@ export default function LoanDetails() {
             <p className="text-sm text-gray-500">Loan ID: {loan.id}</p>
           </div>
         </div>
-        <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(loan.status)}`}>
-          {loan.status}
-        </span>
+        <div className="flex items-center space-x-3">
+          <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(loan.status)}`}>
+            {loan.status}
+          </span>
+          {loan.status === 'pending' && (
+            <button
+              onClick={handleApproveAndBroadcast}
+              disabled={approving}
+              className="btn btn-primary"
+              title="Approve loan and broadcast to Provenance testnet via Keplr"
+            >
+              {approving ? 'Broadcasting…' : 'Approve & Broadcast'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Loan Overview */}
@@ -396,6 +475,9 @@ export default function LoanDetails() {
               <h3 className="text-lg font-medium text-gray-900">Blockchain</h3>
             </div>
             <div className="space-y-3">
+              {approveError && (
+                <div className="text-sm text-red-600">{approveError}</div>
+              )}
               <div>
                 <dt className="text-sm font-medium text-gray-500">Asset ID</dt>
                 <dd className="text-xs text-gray-900 font-mono break-all">{loan.blockchain?.assetId || '-'}</dd>

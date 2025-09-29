@@ -23,6 +23,135 @@ const deployContractSchema = Joi.object({
 // Resolve MCP base URL
 const MCP_BASE_URL = process.env.MCP_BASE_URL || 'http://localhost:6060'
 
+// Keplr integration schemas
+const prepareKeplrSchema = Joi.object({
+  loanId: Joi.string().required(),
+  borrowerAddress: Joi.string().required(),
+  metadata: Joi.object().default({})
+})
+
+const confirmTxSchema = Joi.object({
+  loanId: Joi.string().required(),
+  txHash: Joi.string().required()
+})
+
+// Prepare Provenance tx messages for Keplr signing (asset creation)
+router.post('/keplr/prepare-asset', authenticateToken, async (req, res) => {
+  try {
+    const { error, value } = prepareKeplrSchema.validate(req.body)
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: error.details[0].message }
+      })
+    }
+
+    const { loanId, borrowerAddress, metadata } = value
+
+    const loan = await prisma.loan.findUnique({ where: { id: loanId } })
+    if (!loan) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'LOAN_NOT_FOUND', message: 'Loan not found' }
+      })
+    }
+
+    // Compose metadata fallback from loan if not provided
+    const chainMetadata = Object.keys(metadata).length
+      ? metadata
+      : {
+          borrowerName: loan.borrowerName,
+          loanAmount: Number(loan.loanAmount),
+          interestRate: Number(loan.interestRate),
+          loanTerm: loan.loanTerm,
+          collateralType: 'N/A',
+          collateralValue: 0,
+          createdAt: loan.createdAt.toISOString()
+        }
+
+    const mcpResp = await axios.post(`${MCP_BASE_URL}/tools/provenance/asset/prepare`, {
+      loanId,
+      borrowerAddress,
+      metadata: chainMetadata
+    })
+
+    return res.json({ success: true, data: mcpResp.data })
+  } catch (error: any) {
+    const status = error?.response?.status
+    const mcpMessage = error?.response?.data?.error?.message || error?.response?.data?.message
+    const isConnRefused = error?.code === 'ECONNREFUSED' || /ECONNREFUSED/i.test(String(error?.message))
+    const message = isConnRefused
+      ? 'Provenance MCP service is not reachable. Start MCP on http://localhost:6060.'
+      : (mcpMessage || 'Failed to prepare Keplr messages')
+    console.error('Keplr prepare asset error:', {
+      status,
+      code: error?.code,
+      message: error?.message,
+      mcpMessage
+    })
+    return res.status(isConnRefused ? 502 : (status || 500)).json({
+      success: false,
+      error: { code: 'BLOCKCHAIN_ERROR', message }
+    })
+  }
+})
+
+// Confirm broadcasted tx and persist identifiers on the loan
+router.post('/keplr/confirm', authenticateToken, async (req, res) => {
+  try {
+    const { error, value } = confirmTxSchema.validate(req.body)
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: error.details[0].message }
+      })
+    }
+    const { loanId, txHash } = value
+
+    const loan = await prisma.loan.findUnique({ where: { id: loanId } })
+    if (!loan) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'LOAN_NOT_FOUND', message: 'Loan not found' }
+      })
+    }
+
+    // Query tx details from MCP (stub that returns rich metadata)
+    const txResp = await axios.get(`${MCP_BASE_URL}/tools/provenance/transaction/${txHash}`)
+    const data = txResp.data || {}
+
+    // Persist identifiers we can derive from the prepared response
+    // Note: mcp prepare returned assetId and ledger ids; we may not have them here.
+    // For now, store tx hash; front-end can POST assetId if needed in future.
+    const updated = await prisma.loan.update({
+      where: { id: loanId },
+      data: {
+        blockchainTransactionHash: txHash
+      },
+      include: { collateral: true }
+    })
+
+    return res.json({ success: true, data: { loan: updated, transaction: data } })
+  } catch (error: any) {
+    const status = error?.response?.status
+    const mcpMessage = error?.response?.data?.error?.message || error?.response?.data?.message
+    const isConnRefused = error?.code === 'ECONNREFUSED' || /ECONNREFUSED/i.test(String(error?.message))
+    const message = isConnRefused
+      ? 'Provenance MCP service is not reachable. Start MCP on http://localhost:6060.'
+      : (mcpMessage || 'Failed to confirm transaction')
+    console.error('Keplr confirm error:', {
+      status,
+      code: error?.code,
+      message: error?.message,
+      mcpMessage
+    })
+    return res.status(isConnRefused ? 502 : (status || 500)).json({
+      success: false,
+      error: { code: 'BLOCKCHAIN_ERROR', message }
+    })
+  }
+})
+
 // Register asset on Provenance blockchain (via MCP)
 router.post('/register-asset', authenticateToken, async (req, res) => {
   try {

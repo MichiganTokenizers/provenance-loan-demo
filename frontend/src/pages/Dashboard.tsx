@@ -10,6 +10,7 @@ import {
   ArrowDownIcon
 } from '@heroicons/react/24/outline'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
+import { prepareLoanAssetForKeplr, signAndBroadcastWithKeplr, confirmBroadcastedTx } from '../services/blockchain'
 
 interface DashboardStats {
   totalLoans: number
@@ -43,6 +44,7 @@ export default function Dashboard() {
   const [recentLoans, setRecentLoans] = useState<RecentLoan[]>([])
   const [loading, setLoading] = useState(true)
   const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [approveError, setApproveError] = useState<string | null>(null)
   const { token } = useAuth()
 
   // Fetch loans data on component mount
@@ -112,7 +114,36 @@ export default function Dashboard() {
   const approveLoan = async (loanId: string) => {
     if (!token) return
     try {
+      setApproveError(null)
       setApprovingId(loanId)
+
+      // Enable Keplr and get borrower address
+      const defaultChainId = 'pio-testnet-1'
+      if (!window.keplr || !window.getOfflineSignerAuto) {
+        throw new Error('Keplr wallet not detected')
+      }
+      await window.keplr.enable(defaultChainId)
+      const signer = await window.getOfflineSignerAuto(defaultChainId)
+      const accounts = await signer.getAccounts()
+      const borrowerAddress = accounts[0]?.address
+      if (!borrowerAddress) throw new Error('No account in Keplr')
+
+      // Prepare messages for this loan
+      const prepared = await prepareLoanAssetForKeplr({ token, loanId, borrowerAddress })
+
+      // Sign and broadcast
+      const txHash = await signAndBroadcastWithKeplr(
+        prepared.chainId,
+        prepared.rpc,
+        prepared.messages,
+        prepared.fee,
+        prepared.memo
+      )
+
+      // Confirm and persist
+      await confirmBroadcastedTx({ token, loanId, txHash })
+
+      // Finally mark loan approved
       const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
       const res = await fetch(`${apiBase}/loans/${loanId}`, {
         method: 'PATCH',
@@ -126,16 +157,15 @@ export default function Dashboard() {
         const err = await res.json().catch(() => ({}))
         throw new Error(err?.error?.message || 'Failed to approve loan')
       }
+
       // Update UI state
       setRecentLoans(prev => prev.map(l => l.id === loanId ? { ...l, status: 'approved' as any } : l))
-      // Recompute stats quickly
-      setStats(prev => ({
-        ...prev,
-        activeLoans: prev.activeLoans + 1
-      }))
-    } catch (e) {
-      console.error('Approve loan failed:', e)
-      alert((e as Error).message)
+      setStats(prev => ({ ...prev, activeLoans: prev.activeLoans + 1 }))
+    } catch (e: any) {
+      const backendMessage = e?.response?.data?.error?.message
+      const msg = backendMessage || (e as Error).message
+      console.error('Approve loan failed:', msg)
+      setApproveError(msg)
     } finally {
       setApprovingId(null)
     }
@@ -325,7 +355,7 @@ export default function Dashboard() {
                           disabled={approvingId === loan.id}
                           className={`btn btn-primary ${approvingId === loan.id ? 'opacity-70 cursor-not-allowed' : ''}`}
                         >
-                          {approvingId === loan.id ? 'Approving…' : 'Approve'}
+                          {approvingId === loan.id ? 'Broadcasting…' : 'Approve & Broadcast'}
                         </button>
                       ) : (
                         <span className="text-gray-400">—</span>
@@ -335,6 +365,9 @@ export default function Dashboard() {
                 ))}
               </tbody>
             </table>
+            {approveError && (
+              <div className="px-6 py-3 text-sm text-red-600">{approveError}</div>
+            )}
           </div>
         ) : (
           <div className="text-center py-12">
