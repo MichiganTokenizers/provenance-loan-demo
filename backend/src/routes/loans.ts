@@ -203,10 +203,16 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Generate payment schedule
     const payments = []
+    // Start on the first day of next month at 00:00:00
+    const scheduleStart = new Date()
+    scheduleStart.setHours(0, 0, 0, 0)
+    scheduleStart.setDate(1)
+    scheduleStart.setMonth(scheduleStart.getMonth() + 1)
+
     for (let i = 0; i < loanTerm; i++) {
-      const dueDate = new Date()
-      dueDate.setMonth(dueDate.getMonth() + i + 1)
-      
+      const dueDate = new Date(scheduleStart)
+      dueDate.setMonth(scheduleStart.getMonth() + i)
+
       // Calculate principal and interest for this payment
       const remainingBalance = loanAmount - (monthlyPayment * i)
       const interestPayment = remainingBalance * monthlyRate
